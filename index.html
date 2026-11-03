@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#05070f">
+<title>Star Gazer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="sky" aria-label="Sky view. Drag to look around, pinch or scroll to zoom."></canvas>
+<div id="redlight" hidden></div>
+
+<header id="topbar">
+  <div class="brand">Star&nbsp;Gazer</div>
+  <button class="pill" id="pillTime" data-panel="time"><span id="timeLabel">—</span></button>
+  <button class="pill" id="pillLoc" data-panel="loc"><span id="locLabel">—</span></button>
+</header>
+
+<div id="infocard" hidden>
+  <button class="x" id="infoClose" aria-label="Close">×</button>
+  <div id="infoBody"></div>
+</div>
+
+<div id="facing"><span id="facingLabel"></span></div>
+
+<div id="timestrip">
+  <button data-step="-86400" title="Back 1 day">−1d</button>
+  <button data-step="-3600" title="Back 1 hour">−1h</button>
+  <button id="btnNow" title="Jump to now">Now</button>
+  <button data-step="3600" title="Forward 1 hour">+1h</button>
+  <button data-step="86400" title="Forward 1 day">+1d</button>
+  <button id="btnPlay" title="Time-lapse">▶</button>
+</div>
+
+<nav id="toolbar">
+  <button data-panel="loc"><i>⌖</i><span>Location</span></button>
+  <button data-panel="time"><i>◷</i><span>Date</span></button>
+  <button data-panel="up"><i>✦</i><span>What's up</span></button>
+  <button data-panel="layers"><i>☰</i><span>View</span></button>
+  <button id="btnCompass"><i>➶</i><span>Point</span></button>
+</nav>
+
+<section class="sheet" id="panel-loc" hidden>
+  <div class="sheet-h"><h2>Location</h2><button class="x" data-close>×</button></div>
+  <button class="primary wide" id="btnGps">Use my GPS location</button>
+  <p class="muted small" id="gpsStatus"></p>
+  <form id="searchForm" class="row">
+    <input id="placeInput" type="search" placeholder="Search a city or place…" autocomplete="off">
+    <button type="submit">Search</button>
+  </form>
+  <div id="placeResults"></div>
+  <div class="row two">
+    <label>Latitude<input id="latInput" type="number" step="0.0001" min="-90" max="90"></label>
+    <label>Longitude<input id="lonInput" type="number" step="0.0001" min="-180" max="180"></label>
+  </div>
+  <button class="wide" id="btnSetLoc">Set coordinates</button>
+  <p class="muted small">Quick picks</p>
+  <div class="chips" id="cityChips"></div>
+</section>
+
+<section class="sheet" id="panel-time" hidden>
+  <div class="sheet-h"><h2>Date &amp; time</h2><button class="x" data-close>×</button></div>
+  <label>Date and time (your device's time zone)
+    <input id="dtInput" type="datetime-local" step="60">
+  </label>
+  <p class="muted small" id="utcLabel"></p>
+  <div class="chips">
+    <button data-step="-31557600">−1 yr</button>
+    <button data-step="-2592000">−30 d</button>
+    <button data-step="-604800">−1 wk</button>
+    <button data-step="604800">+1 wk</button>
+    <button data-step="2592000">+30 d</button>
+    <button data-step="31557600">+1 yr</button>
+  </div>
+  <label>Time-lapse speed
+    <select id="speedSel">
+      <option value="1">Real time</option>
+      <option value="60">1 minute / second</option>
+      <option value="600" selected>10 minutes / second</option>
+      <option value="3600">1 hour / second</option>
+      <option value="86400">1 day / second</option>
+    </select>
+  </label>
+  <p class="muted small" id="sunInfo"></p>
+</section>
+
+<section class="sheet" id="panel-up" hidden>
+  <div class="sheet-h"><h2>What's up</h2><button class="x" data-close>×</button></div>
+  <form id="findForm" class="row">
+    <input id="findInput" list="findList" placeholder="Find a star, planet or constellation…" autocomplete="off">
+    <datalist id="findList"></datalist>
+    <button type="submit">Go</button>
+  </form>
+  <p class="muted small" id="skyCond"></p>
+  <h3>Planets, Sun &amp; Moon</h3>
+  <ul class="list" id="planetList"></ul>
+  <h3>Constellations above the horizon</h3>
+  <ul class="list" id="conList"></ul>
+</section>
+
+<section class="sheet" id="panel-layers" hidden>
+  <div class="sheet-h"><h2>View</h2><button class="x" data-close>×</button></div>
+  <p class="muted small">Look toward</p>
+  <div class="chips" id="lookChips">
+    <button data-look="0">N</button><button data-look="45">NE</button><button data-look="90">E</button>
+    <button data-look="135">SE</button><button data-look="180">S</button><button data-look="225">SW</button>
+    <button data-look="270">W</button><button data-look="315">NW</button><button data-look="up">Overhead</button>
+  </div>
+  <label class="toggle"><input type="checkbox" id="optLines" checked> Constellation lines</label>
+  <label class="toggle"><input type="checkbox" id="optConNames" checked> Constellation names</label>
+  <label class="toggle"><input type="checkbox" id="optStarNames" checked> Star names</label>
+  <label class="toggle"><input type="checkbox" id="optGround" checked> Ground (hide what's below the horizon)</label>
+  <label class="toggle"><input type="checkbox" id="optDaylight" checked> Realistic daylight &amp; twilight</label>
+  <label class="toggle"><input type="checkbox" id="optGrid"> Altitude / azimuth grid</label>
+  <label class="toggle"><input type="checkbox" id="optRed"> Night-vision red mode</label>
+  <label>Field of view <span id="fovLabel"></span>
+    <input type="range" id="fovRange" min="10" max="150" value="90">
+  </label>
+</section>
+
+<script src="lib/astronomy.browser.min.js"></script>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
