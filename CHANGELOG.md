@@ -2,6 +2,15 @@
 
 This file lists all notable changes to Star Gazer.
 
+## [1.3.1] - 2026-11-03
+
+### Fixed
+- **Updates now show up right away.** The app's files load with a version tag, so browsers fetch new versions immediately. Before, a phone could keep running old code for up to 10 minutes after an update.
+- **Old saved locations now get a real name.** Locations saved by earlier versions with a generic label (such as "My location (GPS)" or bare coordinates) now look up the town name automatically when the app opens.
+
+### Added
+- The app version is shown at the bottom of the View panel.
+
 ## [1.3.0] - 2026-11-03
 
 ### Added

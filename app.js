@@ -3,6 +3,7 @@
  */
 (() => {
   "use strict";
+  const APP_VERSION = "1.3.1";
   const A = window.Astronomy;
   const D2R = Math.PI / 180, R2D = 180 / Math.PI;
   const $ = (id) => document.getElementById(id);
@@ -976,7 +977,7 @@
     if (cityRows) return Promise.resolve(cityRows);
     if (typeof CITIES_DB !== "undefined") return Promise.resolve(parseCities());
     if (!cityLoading) cityLoading = new Promise((res) => {
-      const sc = document.createElement("script"); sc.src = "cities.js";
+      const sc = document.createElement("script"); sc.src = "cities.js?v=" + APP_VERSION;
       sc.onload = () => res(parseCities()); sc.onerror = () => res(null);
       document.head.appendChild(sc);
     });
@@ -1173,6 +1174,7 @@
     const sun = bodyByName.Sun;
     $("sunInfo").textContent = `Sun is ${sun.alt.toFixed(1)}° ${sun.alt >= 0 ? "above" : "below"} the horizon.`;
     $("fovLabel").textContent = Math.round(state.fov) + "°";
+    $("appVersion").textContent = "Star Gazer v" + APP_VERSION;
     if (openPanel === "up") renderUp();
     if (state.selected) renderInfo();
   }
@@ -1184,6 +1186,10 @@
   $("latInput").value = state.lat.toFixed(4); $("lonInput").value = state.lon.toFixed(4);
   recompute();
   requestAnimationFrame(frame);
+  // older versions saved generic labels ("My location (GPS)", bare coordinates): look up a real place name
+  if (savedLoc && (/^my location/i.test(savedLoc.place || "") || /^\s*-?\d|°/.test(savedLoc.place || "") || !savedLoc.place)) {
+    resolvePlaceName(state.lat, state.lon);
+  }
   if (!savedLoc) {
     const est = timezoneEstimate();
     setLocation(est.lat, est.lon, est.place);

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#05070f">
 <title>Star Gazer</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=1.3.1">
 </head>
 <body>
 <canvas id="sky" aria-label="Sky view. Drag to look around, pinch or scroll to zoom, tap a constellation for details."></canvas>
@@ -121,12 +121,13 @@
   <label>Field of view <span id="fovLabel"></span>
     <input type="range" id="fovRange" min="10" max="150" value="90">
   </label>
+  <p class="muted small" id="appVersion"></p>
 </section>
 
 <script src="lib/astronomy.browser.min.js"></script>
-<script src="data.js"></script>
-<script src="constellations_info.js"></script>
-<script src="timezones.js"></script>
-<script src="app.js"></script>
+<script src="data.js?v=1.3.1"></script>
+<script src="constellations_info.js?v=1.3.1"></script>
+<script src="timezones.js?v=1.3.1"></script>
+<script src="app.js?v=1.3.1"></script>
 </body>
 </html>
