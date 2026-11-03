@@ -70,9 +70,17 @@ input[type=range] { padding: 0; accent-color: var(--accent); }
 .list li.below { opacity: .45; }
 #placeResults button { display: block; width: 100%; text-align: left; margin: 4px 0; font-size: 13px; }
 
-#infocard { position: fixed; top: calc(52px + var(--safe-t)); left: 8px; max-width: min(340px, calc(100vw - 16px)); background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; z-index: 15; font-size: 13px; backdrop-filter: blur(10px); }
+#infocard { position: fixed; top: calc(52px + var(--safe-t)); left: 8px; max-width: min(360px, calc(100vw - 16px)); max-height: calc(100vh - 230px); overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; z-index: 15; font-size: 13px; backdrop-filter: blur(10px); }
 #infocard .x { position: absolute; top: 4px; right: 4px; }
 #infocard h4 { margin: 0 24px 4px 0; font-size: 16px; color: var(--accent); }
 #infocard table { border-collapse: collapse; }
 #infocard td { padding: 2px 10px 2px 0; vertical-align: top; }
 #infocard td:first-child { color: var(--muted); }
+
+#infocard .kicker { font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-right: 26px; }
+#infocard .meaning { font-family: Georgia, serif; font-style: italic; color: #cfd6f5; margin: 0 0 6px; font-size: 14px; }
+#infocard p { margin: 6px 0 8px; line-height: 1.45; }
+#infocard p.look { color: #dfe4fa; }
+#infocard a { color: var(--accent); text-decoration: none; }
+#infocard .small-btn { padding: 5px 10px; font-size: 12px; margin-top: 2px; }
+@media (max-width: 759px) { #infocard { max-height: 44vh; } }

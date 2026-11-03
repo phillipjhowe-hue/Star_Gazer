@@ -24,7 +24,7 @@
     playing: false,
     speed: 600,
     viewAz: 180, viewAlt: 22, fov: 100,
-    opts: Object.assign({ lines: true, conNames: true, starNames: true, ground: true, daylight: true, grid: false, red: false },
+    opts: Object.assign({ lines: true, conNames: true, starNames: true, ground: true, daylight: true, grid: false, red: false, milkyway: true, twinkle: true, landscape: true },
       store.get("opts", {})),
     selected: null,
     compass: false,
@@ -40,6 +40,11 @@
     starEq[i * 3 + 1] = Math.cos(dec) * Math.sin(ra);
     starEq[i * 3 + 2] = Math.sin(dec);
   });
+  const NMW = MILKY_WAY.length;
+  const mwEq = new Float64Array(NMW * 3), mwHor = new Float64Array(NMW * 3);
+  MILKY_WAY.forEach((m, i) => { const v = radec2vec(m[0], m[1]); mwEq.set(v, i * 3); });
+  const twPhase = new Float32Array(NS).map(() => Math.random() * 6.283);
+  const twFreq = new Float32Array(NS).map(() => 2 + Math.random() * 4);
   const conById = {};
   CONSTELLATIONS.forEach((c) => { conById[c.id] = c; c.eq = radec2vec(c.ra, c.dec); });
   // constellation line vertices
@@ -47,6 +52,8 @@
   for (const id in CON_LINES) {
     lineSets.push({ id, segs: CON_LINES[id].map((seg) => seg.map(([ra, dec]) => ({ eq: radec2vec(ra, dec), h: [0, 0, 0] }))) });
   }
+  const boundSets = {};
+  for (const id in CON_BOUNDS) boundSets[id] = CON_BOUNDS[id].map((ring) => ring.map(([ra, dec]) => ({ eq: radec2vec(ra, dec), h: [0, 0, 0] })));
   // which constellation each named star belongs to (by designation suffix)
   function starConName(s) { const c = s[5] && s[5].split(" ")[1]; return c && conById[c] ? conById[c].name : ""; }
 
@@ -82,6 +89,8 @@
     for (let i = 0; i < NS; i++) rotate(rot, starEq[i * 3], starEq[i * 3 + 1], starEq[i * 3 + 2], starHor, i * 3);
     for (const ls of lineSets) for (const seg of ls.segs) for (const p of seg) rotate(rot, p.eq[0], p.eq[1], p.eq[2], p.h, 0);
     for (const c of CONSTELLATIONS) { c.h = [0, 0, 0]; rotate(rot, c.eq[0], c.eq[1], c.eq[2], c.h, 0); }
+    for (let i = 0; i < NMW; i++) rotate(rot, mwEq[i * 3], mwEq[i * 3 + 1], mwEq[i * 3 + 2], mwHor, i * 3);
+    for (const id in boundSets) for (const ring of boundSets[id]) for (const p of ring) rotate(rot, p.eq[0], p.eq[1], p.eq[2], p.h, 0);
     for (const b of BODIES) {
       const eq = A.Equator(b.name, astroTime, observer, false, true);
       const v = eq.vec, n = Math.hypot(v.x, v.y, v.z);
@@ -182,29 +191,102 @@
   const CARD = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
   const compassName = (az) => CARD[Math.round(az / 45) % 8];
 
+  let clock = 0;
+  function nightFactor() { return state.opts.daylight ? Math.max(0, Math.min(1, (-sunAlt - 4) / 12)) : 1; }
   function draw() {
     setupCamera();
     hits = [];
+    clock = performance.now() / 1000;
     const night = !state.opts.daylight || sunAlt < -6;
-    const [top, hor] = skyColors(sunAlt);
-    // sky gradient: brighter toward horizon
-    const hz = projV(dirVec(state.viewAz, 0), -0.99);
-    const zen = projV([0, 0, 1], -0.99);
-    let g;
-    if (hz && zen && Math.hypot(hz[0] - zen[0], hz[1] - zen[1]) > 1) g = ctx.createLinearGradient(zen[0], zen[1], hz[0], hz[1]);
-    else g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, rgb(top)); g.addColorStop(1, rgb(hor));
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-
+    drawSky();
+    if (state.opts.milkyway) drawMilkyWay();
     if (state.opts.grid) drawGrid();
-    const lineCol = night ? "rgba(120,150,255,0.38)" : "rgba(255,255,255,0.35)";
-    if (state.opts.lines) drawLines(lineCol);
+    if (state.opts.lines) drawLines(night);
     drawStars();
     drawBodies();
     if (state.opts.conNames) drawConNames(night);
     if (state.opts.ground) drawGround();
     drawHorizon();
     drawSelection();
+    if (noisePattern) { ctx.globalAlpha = 0.035; ctx.fillStyle = noisePattern; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+  }
+
+  // ---------- sky background ----------
+  let noisePattern = null;
+  (function makeNoise() {
+    const c = document.createElement("canvas"); c.width = c.height = 128;
+    const g = c.getContext("2d"), im = g.createImageData(128, 128);
+    for (let i = 0; i < im.data.length; i += 4) { const v = Math.random() * 255; im.data[i] = im.data[i + 1] = im.data[i + 2] = v; im.data[i + 3] = 255; }
+    g.putImageData(im, 0, 0); noisePattern = ctx.createPattern(c, "repeat");
+  })();
+  function drawSky() {
+    const [top, hor] = skyColors(sunAlt);
+    const hz = projV(dirVec(state.viewAz, 0), -0.99);
+    const zen = projV([0, 0, 1], -0.99);
+    let g;
+    if (hz && zen && Math.hypot(hz[0] - zen[0], hz[1] - zen[1]) > 1) {
+      g = ctx.createLinearGradient(zen[0], zen[1], hz[0], hz[1]);
+      g.addColorStop(0, rgb(top)); g.addColorStop(0.75, rgb(mix(top, hor, 0.55))); g.addColorStop(1, rgb(hor));
+    } else { g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, rgb(top)); g.addColorStop(1, rgb(hor)); }
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    const pxPerDeg = Rs * D2R / 2;
+    // twilight glow toward the Sun
+    if (state.opts.daylight && sunAlt > -18 && sunAlt < 12) {
+      const sp = projV(dirVec(bodyByName.Sun.az, Math.max(sunAlt, -2)), -0.9);
+      if (sp) {
+        const k = sunAlt < -6 ? (sunAlt + 18) / 12 * 0.35 : sunAlt < 2 ? 0.35 + (sunAlt + 6) / 8 * 0.4 : 0.75 - (sunAlt - 2) / 10 * 0.6;
+        const rad = 75 * pxPerDeg;
+        const gl = ctx.createRadialGradient(sp[0], sp[1], 0, sp[0], sp[1], rad);
+        gl.addColorStop(0, `rgba(255,170,90,${k})`); gl.addColorStop(0.35, `rgba(255,120,80,${k * 0.45})`); gl.addColorStop(1, "rgba(255,120,80,0)");
+        ctx.fillStyle = gl; ctx.fillRect(0, 0, W, H);
+      }
+    }
+    // faint airglow near the horizon at night
+    const nf = nightFactor();
+    if (nf > 0 && hz && zen) {
+      const p15 = projV(dirVec(state.viewAz, 18), -0.99);
+      if (p15) {
+        const ag = ctx.createLinearGradient(p15[0], p15[1], hz[0], hz[1]);
+        ag.addColorStop(0, "rgba(60,90,120,0)"); ag.addColorStop(1, `rgba(70,110,130,${0.22 * nf})`);
+        ctx.fillStyle = ag; ctx.fillRect(0, 0, W, H);
+      }
+    }
+  }
+
+  // ---------- Milky Way (rendered to a small offscreen canvas, then scaled up for softness) ----------
+  const mwCanvas = document.createElement("canvas"), mwCtx = mwCanvas.getContext("2d");
+  const mwSprite = (() => {
+    const c = document.createElement("canvas"); c.width = c.height = 32; const g = c.getContext("2d");
+    const gr = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+    gr.addColorStop(0, "rgba(215,225,255,1)"); gr.addColorStop(0.5, "rgba(190,205,255,0.45)"); gr.addColorStop(1, "rgba(180,200,255,0)");
+    g.fillStyle = gr; g.fillRect(0, 0, 32, 32); return c;
+  })();
+  function drawMilkyWay() {
+    const nf = state.opts.daylight ? Math.max(0, Math.min(1, (-sunAlt - 12) / 5)) : 1;
+    const moon = bodyByName.Moon, moonUp = moon.alt > 0 ? (moon.phase || 0) * Math.min(1, moon.alt / 20) : 0;
+    const vis = nf * (1 - 0.65 * moonUp);
+    if (vis < 0.03) return;
+    const S = 4, w = Math.ceil(W / S), h = Math.ceil(H / S);
+    if (mwCanvas.width !== w || mwCanvas.height !== h) { mwCanvas.width = w; mwCanvas.height = h; }
+    mwCtx.clearRect(0, 0, w, h);
+    mwCtx.globalCompositeOperation = "lighter";
+    const size = Math.max(2, 2.4 * Rs * D2R / 2 / S);
+    for (let i = 0; i < NMW; i++) {
+      const z = mwHor[i * 3 + 2];
+      if (state.opts.ground && z < -0.03) continue;
+      const p = proj(mwHor[i * 3], mwHor[i * 3 + 1], z, -0.2);
+      if (!onScreen(p, size * S)) continue;
+      const ext = z < 0.35 ? 0.35 + 0.65 * Math.max(0, z) / 0.35 : 1;
+      mwCtx.globalAlpha = Math.pow(MILKY_WAY[i][2], 1.3) * 0.075 * ext;
+      mwCtx.drawImage(mwSprite, p[0] / S - size, p[1] / S - size, size * 2, size * 2);
+    }
+    mwCtx.globalCompositeOperation = "source-over"; mwCtx.globalAlpha = 1;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, vis);
+    ctx.globalCompositeOperation = "screen";
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(mwCanvas, 0, 0, w * S, h * S);
+    ctx.restore();
   }
 
   function drawGrid() {
@@ -223,34 +305,95 @@
     ctx.stroke();
   }
 
-  function drawLines(col) {
+  function drawLines(night) {
     const selId = state.selected && state.selected.kind === "con" ? state.selected.id : null;
+    const gap = 5;
+    const base = night ? "rgba(125,155,255,0.32)" : "rgba(255,255,255,0.3)";
+    ctx.lineCap = "round";
     for (const ls of lineSets) {
       const sel = ls.id === selId;
-      ctx.strokeStyle = sel ? "rgba(255,207,110,0.9)" : col;
-      ctx.lineWidth = sel ? 2 : 1;
-      ctx.beginPath();
+      const path = new Path2D();
       for (const seg of ls.segs) {
         let prev = null;
         for (const p of seg) {
           const q = projV(p.h, -0.2);
-          if (q && prev) { ctx.moveTo(prev[0], prev[1]); ctx.lineTo(q[0], q[1]); }
+          if (q && prev) {
+            const dx = q[0] - prev[0], dy = q[1] - prev[1], L = Math.hypot(dx, dy);
+            if (L > gap * 2.5) {
+              const ux = dx / L * gap, uy = dy / L * gap;
+              path.moveTo(prev[0] + ux, prev[1] + uy); path.lineTo(q[0] - ux, q[1] - uy);
+            }
+          }
           prev = q;
         }
       }
-      ctx.stroke();
+      if (sel) {
+        ctx.strokeStyle = "rgba(255,207,110,0.25)"; ctx.lineWidth = 7; ctx.stroke(path);
+        ctx.strokeStyle = "rgba(255,215,130,0.95)"; ctx.lineWidth = 2; ctx.stroke(path);
+      } else {
+        ctx.strokeStyle = base; ctx.lineWidth = 1.1; ctx.stroke(path);
+      }
     }
+    if (selId && boundSets[selId]) drawBounds(selId);
   }
+  function drawBounds(id) {
+    ctx.save();
+    ctx.setLineDash([4, 5]);
+    ctx.strokeStyle = "rgba(255,207,110,0.55)"; ctx.lineWidth = 1;
+    const fill = new Path2D();
+    ctx.beginPath();
+    for (const ring of boundSets[id]) {
+      let pen = false, prev = null;
+      for (const p of ring) {
+        const q = projV(p.h, -0.3);
+        if (!q || (prev && Math.hypot(q[0] - prev[0], q[1] - prev[1]) > Math.max(W, H))) { pen = false; prev = q; continue; }
+        if (pen) { ctx.lineTo(q[0], q[1]); fill.lineTo(q[0], q[1]); } else { ctx.moveTo(q[0], q[1]); fill.moveTo(q[0], q[1]); }
+        pen = true; prev = q;
+      }
+    }
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255,207,110,0.06)"; ctx.fill(fill, "evenodd");
+    ctx.restore();
+  }
+
+  // pre-rendered star sprites by colour: soft halo + bright core; brightest stars get faint spikes
+  const BV_BINS = [-0.3, 0, 0.3, 0.6, 0.9, 1.2, 1.6];
+  const binOf = (bv) => { let b = 0; for (let i = 0; i < BV_BINS.length; i++) if (bv >= BV_BINS[i] - 0.15) b = i; return b; };
+  const starBin = STARS.map((s) => binOf(s[3]));
+  function makeSprite(c, spikes) {
+    const N = 64, cv2 = document.createElement("canvas"); cv2.width = cv2.height = N; const g = cv2.getContext("2d");
+    const m = N / 2;
+    const gr = g.createRadialGradient(m, m, 0, m, m, m);
+    gr.addColorStop(0, "rgba(255,255,255,1)");
+    gr.addColorStop(0.08, `rgba(${c},1)`);
+    gr.addColorStop(0.2, `rgba(${c},0.45)`);
+    gr.addColorStop(0.45, `rgba(${c},0.1)`);
+    gr.addColorStop(1, `rgba(${c},0)`);
+    g.fillStyle = gr; g.fillRect(0, 0, N, N);
+    if (spikes) {
+      g.globalCompositeOperation = "lighter";
+      for (const [w, h] of [[N, 1.6], [1.6, N]]) {
+        const lg = w > h ? g.createLinearGradient(0, 0, N, 0) : g.createLinearGradient(0, 0, 0, N);
+        lg.addColorStop(0, `rgba(${c},0)`); lg.addColorStop(0.5, `rgba(${c},0.55)`); lg.addColorStop(1, `rgba(${c},0)`);
+        g.fillStyle = lg; g.fillRect(m - w / 2, m - h / 2, w, h);
+      }
+    }
+    return cv2;
+  }
+  const sprites = BV_BINS.map((bv) => makeSprite(bvColor(bv).join(","), false));
+  const spikeSprites = BV_BINS.map((bv) => makeSprite(bvColor(bv).join(","), true));
 
   function starRadius(mag) {
     const zf = Math.max(0.85, Math.min(2.2, Math.pow(90 / state.fov, 0.4)));
-    return Math.max(0.45, Math.min(6, 0.6 + (Math.min(limMag, 6.5) + 1 - mag) * 0.55)) * zf;
+    return Math.max(0.5, Math.min(6.5, 0.65 + (Math.min(limMag, 6.5) + 1 - mag) * 0.55)) * zf;
   }
   function drawStars() {
     const lim = limMag + Math.max(0, Math.log2(90 / state.fov)) * 0.6; // zooming in reveals a bit more
     const labelLim = state.fov > 110 ? 1.0 : state.fov > 70 ? 1.8 : state.fov > 35 ? 2.7 : 4.5;
     const groundOn = state.opts.ground;
+    const tw = state.opts.twinkle ? nightFactor() : 0;
     ctx.font = "11px system-ui, sans-serif";
+    const labels = [];
     for (let i = 0; i < NS; i++) {
       const s = STARS[i];
       if (s[2] > lim) break; // sorted by magnitude
@@ -264,20 +407,29 @@
       const m = s[2] + ext;
       if (m > lim + 0.3) continue;
       const r = starRadius(m);
-      const a = Math.max(0.18, Math.min(1, (lim - m) / 1.6 + 0.35));
-      if (m < 1.5) {
-        const gl = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], r * 4);
-        gl.addColorStop(0, `rgba(${starRGB[i]},${0.35 * a})`); gl.addColorStop(1, `rgba(${starRGB[i]},0)`);
-        ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(p[0], p[1], r * 4, 0, 7); ctx.fill();
+      let a = Math.max(0.2, Math.min(1, (lim - m) / 1.6 + 0.4));
+      if (tw) { // scintillation: stronger near the horizon
+        const amt = tw * (0.12 + 0.3 * Math.max(0, 1 - alt / 40));
+        a *= 1 - amt * (0.5 + 0.5 * Math.sin(clock * twFreq[i] + twPhase[i]));
       }
-      ctx.fillStyle = `rgba(${starRGB[i]},${a})`;
-      ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, 7); ctx.fill();
-      hits.push({ x: p[0], y: p[1], r: r + 2, sel: { kind: "star", i }, pri: 6 - s[2] });
-      if (state.opts.starNames && s[4] && s[2] < labelLim) {
-        ctx.fillStyle = "rgba(220,226,255,0.75)";
-        ctx.fillText(s[4], p[0] + r + 4, p[1] + 3);
+      if (r < 1.1) {
+        ctx.globalAlpha = a;
+        ctx.fillStyle = `rgb(${starRGB[i]})`;
+        ctx.fillRect(p[0] - r, p[1] - r, r * 2, r * 2);
+      } else {
+        const big = m < 0.8;
+        const S = r * (big ? 7 : 5);
+        ctx.globalAlpha = a;
+        ctx.drawImage(big ? spikeSprites[starBin[i]] : sprites[starBin[i]], p[0] - S / 2, p[1] - S / 2, S, S);
       }
+      hits.push({ x: p[0], y: p[1], r: Math.max(r + 4, 9), sel: { kind: "star", i }, pri: 6 - s[2] });
+      if (state.opts.starNames && s[4] && s[2] < labelLim) labels.push([s[4], p[0] + r + 5, p[1] + 4]);
     }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "rgba(225,230,255,0.78)";
+    ctx.shadowColor = "rgba(0,0,0,0.8)"; ctx.shadowBlur = 3;
+    for (const [t, x, y] of labels) ctx.fillText(t, x, y);
+    ctx.shadowBlur = 0;
   }
 
   function drawBodies() {
@@ -341,16 +493,17 @@
   }
 
   function drawConNames(night) {
-    ctx.font = "italic 12px Georgia, serif";
     ctx.textAlign = "center";
+    const selId = state.selected && state.selected.kind === "con" ? state.selected.id : null;
     for (const c of CONSTELLATIONS) {
-      if (state.fov > 110 && c.rank > 1) continue;
-      if (state.opts.ground && c.h[2] < 0) continue;
+      const sel = c.id === selId;
+      if (state.fov > 110 && c.rank > 1 && !sel) continue;
+      if (state.opts.ground && c.h[2] < 0.01) continue;
       const p = projV(c.h, -0.2);
       if (!onScreen(p, 0)) continue;
-      ctx.fillStyle = night ? "rgba(150,170,255,0.6)" : "rgba(255,255,255,0.6)";
-      ctx.fillText(c.name.toUpperCase().split("").join(" "), p[0], p[1]);
-      hits.push({ x: p[0], y: p[1], r: 40, sel: { kind: "con", id: c.id }, pri: -1 });
+      ctx.font = sel ? "600 13px Georgia, serif" : "italic 11.5px Georgia, serif";
+      ctx.fillStyle = sel ? "rgba(255,215,130,1)" : night ? "rgba(160,180,255,0.62)" : "rgba(255,255,255,0.65)";
+      ctx.fillText(c.name.toUpperCase().split("").join("\u200a"), p[0], p[1]);
     }
     ctx.textAlign = "left";
   }
@@ -389,19 +542,51 @@
   function drawGround() {
     const gp = groundPath();
     const day = state.opts.daylight ? Math.max(0, Math.min(1, (sunAlt + 8) / 14)) : 0;
-    ctx.fillStyle = rgb(mix([8, 12, 10], [44, 54, 38], day), 0.97);
+    const groundCol = mix([7, 10, 9], [40, 50, 36], day);
+    ctx.fillStyle = rgb(groundCol, 0.98);
     ctx.fill(gp.path, gp.rule);
+    if (state.opts.landscape) drawLandscape(groundCol);
+  }
+  // procedural skyline: rolling hills with a ragged tree line (altitude in degrees by azimuth)
+  function skyline(az) {
+    const a = az * D2R;
+    let h = 1.1 + 0.9 * Math.sin(a * 2 + 1.3) + 0.6 * Math.sin(a * 5 + 0.4) + 0.35 * Math.sin(a * 11 + 2.1);
+    const t = Math.sin(a * 37) * Math.sin(a * 23 + 1) + 0.6 * Math.sin(a * 71 + 0.7);
+    if (Math.sin(a * 3 + 0.5) > -0.2) h += Math.max(0, t) * 0.9; // tree clumps
+    return Math.max(0.15, h);
+  }
+  function drawLandscape(col) {
+    const step = state.fov < 40 ? 0.25 : 0.75;
+    let run = [];
+    const flush = () => {
+      if (run.length > 1) {
+        ctx.beginPath();
+        run.forEach((q, k) => (k ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])));
+        for (let k = run.length - 1; k >= 0; k--) { const b = projV(dirVec(run[k][2], -3), -0.9); if (b) ctx.lineTo(b[0], b[1]); }
+        ctx.closePath(); ctx.fill();
+      }
+      run = [];
+    };
+    ctx.fillStyle = rgb(col, 1);
+    for (let az = 0; az <= 360 + 1e-9; az += step) {
+      const q = projV(dirVec(az, skyline(az)), -0.6);
+      if (!q) { flush(); continue; }
+      q[2] = az; run.push(q);
+    }
+    flush();
   }
   function drawHorizon() {
-    ctx.strokeStyle = "rgba(255,207,110,0.55)"; ctx.lineWidth = 1.2;
-    polyline((t) => dirVec(t, 0), 0, 360, 2);
+    if (!state.opts.landscape || !state.opts.ground) {
+      ctx.strokeStyle = "rgba(255,207,110,0.55)"; ctx.lineWidth = 1.2;
+      polyline((t) => dirVec(t, 0), 0, 360, 2);
+    }
     ctx.font = "700 14px system-ui, sans-serif"; ctx.textAlign = "center";
     for (let i = 0; i < 8; i++) {
       const p = projV(dirVec(i * 45, 0), 0);
       if (!onScreen(p, 0)) continue;
       ctx.fillStyle = i === 0 ? "#ff8a7a" : i % 2 ? "rgba(255,207,110,0.6)" : "rgba(255,207,110,0.95)";
       ctx.font = i % 2 ? "600 11px system-ui, sans-serif" : "700 15px system-ui, sans-serif";
-      ctx.fillText(CARD[i], p[0], p[1] + 20);
+      ctx.fillText(CARD[i], p[0], p[1] + 22);
     }
     const zp = projV([0, 0, 1], 0);
     if (onScreen(zp, 0)) { ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.font = "11px system-ui"; ctx.fillText("+ zenith", zp[0], zp[1] + 4); }
@@ -497,15 +682,35 @@
     anim = null; e.preventDefault();
   });
 
+  // screen point -> horizontal unit vector (inverse stereographic)
+  function unproject(x, y) {
+    const X = (x - W / 2) / Rs, Y = -(y - H / 2) / Rs, r2 = X * X + Y * Y;
+    const a = 2 * X / (1 + r2), b = 2 * Y / (1 + r2), d = (1 - r2) / (1 + r2);
+    return [0, 1, 2].map((k) => a * RT[k] + b * UP[k] + d * F[k]);
+  }
+  function toEquatorial(h) {
+    const x = rot[0][0] * h[0] + rot[0][1] * h[1] + rot[0][2] * h[2];
+    const y = rot[1][0] * h[0] + rot[1][1] * h[1] + rot[1][2] * h[2];
+    const z = rot[2][0] * h[0] + rot[2][1] * h[1] + rot[2][2] * h[2];
+    return { ra: (Math.atan2(y, x) * R2D + 360) % 360, dec: Math.asin(Math.max(-1, Math.min(1, z))) * R2D };
+  }
   function pick(x, y) {
     let best = null, bd = 1e9;
     for (const h of hits) {
       const d = Math.hypot(h.x - x, h.y - y);
       if (d > Math.max(h.r, 16)) continue;
-      const score = d - h.pri * 0.8;
+      const score = d - h.pri * 1.5;
       if (score < bd) { bd = score; best = h; }
     }
-    if (best) select(best.sel); else { state.selected = null; $("infocard").hidden = true; }
+    if (best) { select(best.sel); return; }
+    const v = unproject(x, y);
+    if (state.opts.ground && v[2] < 0) { state.selected = null; $("infocard").hidden = true; return; }
+    const eq = toEquatorial(v);
+    try {
+      const c = A.Constellation(eq.ra / 15, eq.dec);
+      if (c && conById[c.symbol]) { select({ kind: "con", id: c.symbol }); return; }
+    } catch (e) { /* ignore */ }
+    state.selected = null; $("infocard").hidden = true;
   }
 
   // ---------- info card ----------
@@ -526,22 +731,28 @@
   }
   function select(sel, center) {
     state.selected = sel;
-    renderInfo();
+    renderInfo(true);
+    $("infocard").scrollTop = 0;
     if (center) {
       const v = selVec(sel);
       pointTo(hAz(v), hAlt(v), sel.kind === "con" ? Math.min(state.fov, 70) : undefined);
     }
   }
-  function renderInfo() {
+  let lastInfoKey = "";
+  function renderInfo(force) {
     const sel = state.selected;
-    if (!sel) { $("infocard").hidden = true; return; }
+    if (!sel) { $("infocard").hidden = true; lastInfoKey = ""; return; }
     let title = "", rows = [];
     const v = selVec(sel), alt = hAlt(v), az = hAz(v);
+    const key = JSON.stringify(sel) + "|" + Math.round(alt) + "|" + Math.round(az) + "|" + Math.round(state.time / 60000);
+    if (!force && key === lastInfoKey && !$("infocard").hidden) return;
+    lastInfoKey = key;
     if (sel.kind === "star") {
       const s = STARS[sel.i];
       title = s[4] || s[5] || "Star";
       if (s[4] && s[5]) rows.push(["Designation", s[5]]);
-      const cn = starConName(s); if (cn) rows.push(["Constellation", cn]);
+      const cid = s[5] && s[5].split(" ")[1];
+      if (cid && conById[cid]) rows.push(["Constellation", `<a href="#" data-con="${cid}">${conById[cid].name} ›</a>`]);
       rows.push(["Magnitude", s[2].toFixed(2)]);
       rows.push(["Position", fmtAltAz(alt, az)]);
       rows.push(["RA / Dec (J2000)", `${fmtRA(s[0] / 15)}, ${fmtDec(s[1])}`]);
@@ -558,22 +769,51 @@
       } else {
         rows.push(["Magnitude", b.mag.toFixed(1)]);
         rows.push(["Distance", `${b.dist.toFixed(2)} AU`]);
-        rows.push(["Constellation", A.Constellation(b.ra, b.dec).name]);
+        const bc = A.Constellation(b.ra, b.dec);
+        rows.push(["In", conById[bc.symbol] ? `<a href="#" data-con="${bc.symbol}">${bc.name} ›</a>` : bc.name]);
       }
       const [r, s] = riseSet(b.name);
       rows.push(["Next rise", fmtTime(r)]); rows.push(["Next set", fmtTime(s)]);
     } else {
-      const c = conById[sel.id];
-      title = c.name;
-      rows.push(["Abbrev.", c.id]);
-      rows.push(["Centre", fmtAltAz(alt, az)]);
-      const bright = STARS.filter((s) => s[5] && s[5].split(" ")[1] === c.id && s[4]).slice(0, 3).map((s) => s[4]);
-      if (bright.length) rows.push(["Bright stars", bright.join(", ")]);
+      return renderConInfo(sel.id, alt, az);
     }
     const note = alt < 0 ? `<p class="small" style="color:#ff9b8a">Below the horizon right now.</p>` : "";
     $("infoBody").innerHTML = `<h4>${title}</h4><table>${rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join("")}</table>${note}`;
     $("infocard").hidden = false;
   }
+  const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  function renderConInfo(id, alt, az) {
+    const c = conById[id], info = CON_INFO[id] || ["", "", ""];
+    const members = STARS.filter((s) => s[5] && s[5].split(" ")[1] === id);
+    const brightest = members[0];
+    const named = members.filter((s) => s[4]).slice(0, 4).map((s) => s[4]);
+    const best = MONTHS[Math.floor(2.7 + ((((c.ra / 15 - 9) / 2) % 12) + 12) % 12) % 12];
+    const north = Math.min(90, Math.round(c.dec + 90)), south = Math.max(-90, Math.round(c.dec - 90));
+    const latTxt = (v) => v === 90 ? "the North Pole" : v === -90 ? "the South Pole" : `${Math.abs(v)}°${v >= 0 ? "N" : "S"}`;
+    const rows = [
+      ["Position", alt < 0 ? `Below the horizon (${compassName(az)})` : `${alt.toFixed(0)}° up, ${compassName(az)} (${az.toFixed(0)}°)`],
+      ["Best seen", `${best} evenings (around 9 pm)`],
+      ["Visible from", `${latTxt(north)} to ${latTxt(south)}`],
+    ];
+    if (brightest) rows.push(["Brightest star", `<a href="#" data-star="${STARS.indexOf(brightest)}">${brightest[4] || brightest[5]} ›</a> (mag ${brightest[2].toFixed(1)})`]);
+    if (named.length > 1) rows.push(["Named stars", named.join(", ")]);
+    rows.push(["Naked-eye stars*", String(members.length)]);
+    $("infoBody").innerHTML = `<div class="kicker">Constellation · ${id}</div><h4>${c.name}</h4>` +
+      (info[0] ? `<div class="meaning">${info[0]}</div>` : "") +
+      (info[1] ? `<p>${info[1]}</p>` : "") +
+      (info[2] ? `<p class="look"><b>Look for:</b> ${info[2]}</p>` : "") +
+      `<table>${rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join("")}</table>` +
+      `<p class="small muted">*Stars brighter than magnitude 6, the naked-eye limit.</p>` +
+      `<button class="small-btn" id="btnCenterCon">Center in view</button>`;
+    $("btnCenterCon").onclick = () => select({ kind: "con", id }, true);
+    $("infocard").hidden = false;
+  }
+  $("infoBody").addEventListener("click", (e) => {
+    const a = e.target.closest("a"); if (!a) return;
+    e.preventDefault();
+    if (a.dataset.con) select({ kind: "con", id: a.dataset.con });
+    else if (a.dataset.star) select({ kind: "star", i: Number(a.dataset.star) }, true);
+  });
   $("infoClose").onclick = () => { state.selected = null; $("infocard").hidden = true; };
 
   // ---------- panels ----------
@@ -691,7 +931,7 @@
   };
 
   // ---------- layers ----------
-  const optMap = { optLines: "lines", optConNames: "conNames", optStarNames: "starNames", optGround: "ground", optDaylight: "daylight", optGrid: "grid", optRed: "red" };
+  const optMap = { optLines: "lines", optConNames: "conNames", optStarNames: "starNames", optGround: "ground", optDaylight: "daylight", optGrid: "grid", optRed: "red", optMilky: "milkyway", optTwinkle: "twinkle", optLand: "landscape" };
   for (const id in optMap) {
     $(id).checked = state.opts[optMap[id]];
     $(id).onchange = (e) => { state.opts[optMap[id]] = e.target.checked; store.set("opts", state.opts); applyOpts(); recompute(); };
