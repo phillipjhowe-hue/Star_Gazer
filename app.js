@@ -847,12 +847,52 @@
   // ---------- location controls ----------
   function setLocation(lat, lon, place) {
     if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return;
+    geoSeq++;
     state.lat = lat; state.lon = lon; state.place = place || fmtLatLon(lat, lon);
     store.set("loc", { lat, lon, place: state.place });
     $("latInput").value = lat.toFixed(4); $("lonInput").value = lon.toFixed(4);
     recompute();
   }
-  const fmtLatLon = (lat, lon) => `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? "N" : "S"}, ${Math.abs(lon).toFixed(2)}°${lon >= 0 ? "E" : "W"}`;
+  const fmtLatLon = (lat, lon, dp = 2) => `${Math.abs(lat).toFixed(dp)}°${lat >= 0 ? "N" : "S"}, ${Math.abs(lon).toFixed(dp)}°${lon >= 0 ? "E" : "W"}`;
+  // ---------- reverse geocoding: nearest city offline, then the exact town via OpenStreetMap ----------
+  const US_STATES = { Alabama: "AL", Alaska: "AK", Arizona: "AZ", Arkansas: "AR", California: "CA", Colorado: "CO", Connecticut: "CT", Delaware: "DE", Florida: "FL", Georgia: "GA", Hawaii: "HI", Idaho: "ID", Illinois: "IL", Indiana: "IN", Iowa: "IA", Kansas: "KS", Kentucky: "KY", Louisiana: "LA", Maine: "ME", Maryland: "MD", Massachusetts: "MA", Michigan: "MI", Minnesota: "MN", Mississippi: "MS", Missouri: "MO", Montana: "MT", Nebraska: "NE", Nevada: "NV", "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY", "North Carolina": "NC", "North Dakota": "ND", Ohio: "OH", Oklahoma: "OK", Oregon: "OR", Pennsylvania: "PA", "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD", Tennessee: "TN", Texas: "TX", Utah: "UT", Vermont: "VT", Virginia: "VA", Washington: "WA", "West Virginia": "WV", Wisconsin: "WI", Wyoming: "WY", "District of Columbia": "DC" };
+  function placeLabel(name, region, cc) {
+    if (cc === "US" || cc === "us") return `${name}, ${US_STATES[region] || region}`;
+    return [name, countryName((cc || "").toUpperCase())].filter(Boolean).join(", ");
+  }
+  function nearestCity(lat, lon) {
+    if (!cityRows) return null;
+    let best = null, bd = 1e9;
+    const cl = Math.cos(lat * D2R);
+    for (const c of cityRows) {
+      const dy = c.lat - lat, dx = ((c.lon - lon + 540) % 360 - 180) * cl;
+      const d = dy * dy + dx * dx;
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best && { city: best, km: Math.sqrt(bd) * 111.2 };
+  }
+  let geoSeq = 0;
+  async function resolvePlaceName(lat, lon, done) {
+    const seq = ++geoSeq;
+    const apply = (name) => {
+      if (seq !== geoSeq || state.lat !== lat || state.lon !== lon) return; // location changed meanwhile
+      state.place = name; store.set("loc", { lat, lon, place: name }); uiDirty = true;
+      if (done) done(name);
+    };
+    await loadCities();
+    const n = nearestCity(lat, lon);
+    if (n) {
+      const lbl = placeLabel(n.city.name, n.city.region, n.city.cc);
+      apply(n.km <= 12 ? lbl : n.km <= 40 ? `Near ${lbl}` : `${Math.round(n.km)} km from ${lbl}`);
+    }
+    try { // exact town / village / neighbourhood (works on the website; blocked inside the claude.ai preview)
+      const ctrl = new AbortController(); setTimeout(() => ctrl.abort(), 8000);
+      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=14&accept-language=en&lat=${lat}&lon=${lon}`, { signal: ctrl.signal });
+      const a = (await r.json()).address || {};
+      const town = a.city || a.town || a.village || a.hamlet || a.suburb || a.municipality || a.county;
+      if (town) apply(placeLabel(town, a.state || a.region || a.province || "", a.country_code));
+    } catch (e) { /* offline or blocked: keep the nearest-city name */ }
+  }
   // Best guess from the device's time zone: works everywhere, no permission needed.
   function timezoneEstimate() {
     let tz = "";
@@ -890,9 +930,14 @@
     const timer = setTimeout(() => { if (!done) { done = true; fallback("GPS didn't respond."); } }, 20000);
     const ok = (pos) => {
       if (done) return; done = true; clearTimeout(timer); gpsBusy = false;
-      setLocation(pos.coords.latitude, pos.coords.longitude, "My location (GPS)");
-      status.textContent = `Located to within ~${Math.round(pos.coords.accuracy).toLocaleString()} m.`;
-      if (!silent) showPanel(null);
+      const { latitude: la, longitude: lo, accuracy } = pos.coords;
+      setLocation(la, lo, "My location");
+      const acc = `GPS accuracy ~${Math.round(accuracy).toLocaleString()} m`;
+      status.textContent = `Located: ${fmtLatLon(la, lo, 4)} (${acc}). Looking up the place name…`;
+      resolvePlaceName(la, lo, (name) => {
+        const lead = /^near /i.test(name) ? `You're near <b>${name.slice(5)}</b>` : /km from/.test(name) ? `You're <b>${name}</b>` : `You're in <b>${name}</b>`;
+        status.innerHTML = `${lead}<br>${fmtLatLon(la, lo, 4)} · ${acc}`;
+      });
     };
     const fail = (err, triedHigh) => {
       if (done) return;
@@ -911,7 +956,10 @@
     } catch (e) { done = true; clearTimeout(timer); fallback("GPS isn't available here."); }
   }
   $("btnGps").onclick = () => useGps(false);
-  $("btnSetLoc").onclick = () => setLocation(parseFloat($("latInput").value), parseFloat($("lonInput").value));
+  $("btnSetLoc").onclick = () => {
+    const la = parseFloat($("latInput").value), lo = parseFloat($("lonInput").value);
+    setLocation(la, lo); if (state.lat === la && state.lon === lo) resolvePlaceName(la, lo);
+  };
   const CITIES = [["New York", 40.7128, -74.006], ["London", 51.5074, -0.1278], ["Los Angeles", 34.0522, -118.2437],
     ["Reykjavík", 64.1466, -21.9426], ["Tokyo", 35.6762, 139.6503], ["Sydney", -33.8688, 151.2093],
     ["Atacama, Chile", -22.9087, -68.1997], ["Cape Town", -33.9249, 18.4241], ["Equator (Quito)", -0.1807, -78.4678],
@@ -983,7 +1031,7 @@
   async function placeSearch() {
     const q = $("placeInput").value.trim(); if (!q) return;
     const co = parseCoords(q);
-    if (co) { setLocation(co.lat, co.lon); $("placeResults").textContent = "Location set to " + fmtLatLon(co.lat, co.lon) + "."; return; }
+    if (co) { setLocation(co.lat, co.lon); resolvePlaceName(co.lat, co.lon); $("placeResults").textContent = "Location set to " + fmtLatLon(co.lat, co.lon) + "."; return; }
     $("placeResults").textContent = "Searching…";
     const rows = await loadCities();
     if (rows) {
@@ -1117,6 +1165,9 @@
     const d = new Date(state.time);
     $("timeLabel").textContent = (state.live ? "Now · " : "") + d.toLocaleString([], { month: "short", day: "numeric", year: d.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined, hour: "numeric", minute: "2-digit" });
     $("locLabel").textContent = state.place;
+    $("locCoords").textContent = fmtLatLon(state.lat, state.lon, 3);
+    $("curLocName").textContent = state.place;
+    $("curLocCoords").textContent = fmtLatLon(state.lat, state.lon, 4);
     if (document.activeElement !== $("dtInput")) $("dtInput").value = toLocalInput(state.time);
     $("utcLabel").textContent = "UTC: " + d.toISOString().replace("T", " ").slice(0, 16);
     const sun = bodyByName.Sun;

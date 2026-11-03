@@ -84,3 +84,15 @@ input[type=range] { padding: 0; accent-color: var(--accent); }
 #infocard a { color: var(--accent); text-decoration: none; }
 #infocard .small-btn { padding: 5px 10px; font-size: 12px; margin-top: 2px; }
 @media (max-width: 759px) { #infocard { max-height: 44vh; } }
+#pillLoc { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; padding: 4px 12px; border-radius: 14px; }
+#pillLoc #locLabel { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+#pillLoc small { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.curloc { display: flex; flex-direction: column; gap: 2px; background: rgba(255,255,255,0.05); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; }
+.curloc .small { margin: 0; }
+.mono { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--muted); }
+#gpsStatus b { color: var(--accent); }
+@media (max-width: 480px) {
+  .brand { display: none; }
+  .pill { max-width: 50vw; }
+  #pillTime { font-size: 12px; }
+}

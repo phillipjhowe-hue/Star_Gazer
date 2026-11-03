@@ -14,7 +14,7 @@
 <header id="topbar">
   <div class="brand">Star&nbsp;Gazer</div>
   <button class="pill" id="pillTime" data-panel="time"><span id="timeLabel">—</span></button>
-  <button class="pill" id="pillLoc" data-panel="loc"><span id="locLabel">—</span></button>
+  <button class="pill" id="pillLoc" data-panel="loc"><span id="locLabel">—</span><small id="locCoords"></small></button>
 </header>
 
 <div id="infocard" hidden>
@@ -43,6 +43,7 @@
 
 <section class="sheet" id="panel-loc" hidden>
   <div class="sheet-h"><h2>Location</h2><button class="x" data-close>×</button></div>
+  <div class="curloc"><span class="muted small">Current location</span><b id="curLocName">—</b><span id="curLocCoords" class="mono"></span></div>
   <button class="primary wide" id="btnGps">Use my GPS location</button>
   <p class="muted small" id="gpsStatus"></p>
   <form id="searchForm" class="row">

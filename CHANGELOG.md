@@ -2,6 +2,20 @@
 
 This file lists all notable changes to Star Gazer.
 
+## [1.3.0] - 2026-11-03
+
+### Added
+- **Your town and coordinates after a GPS fix.** When "Use my GPS location" succeeds, the app shows the city or town you're in (for example "Boulder, CO") along with your exact coordinates and the GPS accuracy.
+  - The name comes from the nearest city in the built-in list first, so it works offline.
+  - When online, the app refines it to your exact town, village or neighbourhood using OpenStreetMap.
+  - If you're far from any town, it shows the distance instead, for example "117 km from Rexburg, ID".
+- **A two-line location pill** at the top that shows the place name with its coordinates underneath.
+- **A "Current location" box** at the top of the Location panel.
+- **Place names for typed coordinates.** Coordinates entered in the search box or the latitude/longitude fields are now also matched to a place name.
+
+### Changed
+- On narrow phone screens, the "Star Gazer" title is hidden so the date and location pills have room.
+
 ## [1.2.0] - 2026-11-03
 
 ### Fixed
