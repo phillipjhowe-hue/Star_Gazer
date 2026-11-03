@@ -2,11 +2,11 @@
 
 A browser app that shows which constellations, stars and planets are in the sky from any place at any time.
 
-**Live app:** https://phillipjhowe-hue.github.io/star_gazer/
+**Live app:** https://phillipjhowe-hue.github.io/Star_Gazer/
 
 ## Features
 
-- **Your location by GPS.** You can also search for a place, type in coordinates, or pick a preset (Atacama, Reykjavík, the poles and others).
+- **Your location by GPS.** If GPS is unavailable, the app estimates your location from your time zone. You can also search 30,000+ cities offline, type in coordinates, or pick a preset (Atacama, Reykjavík, the poles and others).
 - **Any date and time, past or future.** Step by an hour, a day, a week, 30 days or a year, or run a time-lapse at up to one day per second.
 - **A realistic sky view.** Drag to look around, and pinch or scroll to zoom. On a phone, **Point** mode lets you aim the phone at the sky.
 - **About 5,000 stars** down to magnitude 6, shown in their real colours with soft glows. The brightest stars have diffraction spikes, and stars gently twinkle (more strongly near the horizon).
@@ -23,6 +23,9 @@ A browser app that shows which constellations, stars and planets are in the sky 
 
 It's a static site with no build step. Open `index.html` through any web server (for example `python3 -m http.server`), or use the GitHub Pages link above. GPS and phone-compass mode need HTTPS or localhost.
 
+See [CHANGELOG.md](CHANGELOG.md) for the release history.
+
+`tools/build_places.py` regenerates `cities.js` and `timezones.js`.
 `tools/bundle.py` creates a single self-contained `dist/star_gazer.html`.
 `tools/build_data.py` regenerates `data.js` (stars, lines, boundaries and the Milky Way model built by `tools/build_milkyway.py`) from the d3-celestial data files.
 
@@ -30,4 +33,4 @@ It's a static site with no build step. Open `index.html` through any web server 
 
 - Planet, Sun and Moon positions, precession and nutation: [Astronomy Engine](https://github.com/cosinekitty/astronomy) by Don Cross (MIT licence).
 - Star catalogue, constellation lines and boundaries: [d3-celestial](https://github.com/ofrohn/d3-celestial) by Olaf Frohn (BSD-3-Clause licence).
-- Place search: OpenStreetMap Nominatim.
+- Offline city list: [GeoNames](https://www.geonames.org) via [cities-json](https://github.com/lmfmaier/cities-json) (CC BY 4.0). Time-zone locations: the IANA tz database. Online fallback search: OpenStreetMap Nominatim.

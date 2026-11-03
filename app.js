@@ -18,7 +18,7 @@
   const state = {
     lat: savedLoc ? savedLoc.lat : 40.7128,
     lon: savedLoc ? savedLoc.lon : -74.006,
-    place: savedLoc ? savedLoc.place : "New York (default)",
+    place: savedLoc ? savedLoc.place : "—",
     time: Date.now(),
     live: true,          // follow the real clock
     playing: false,
@@ -853,13 +853,62 @@
     recompute();
   }
   const fmtLatLon = (lat, lon) => `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? "N" : "S"}, ${Math.abs(lon).toFixed(2)}°${lon >= 0 ? "E" : "W"}`;
+  // Best guess from the device's time zone: works everywhere, no permission needed.
+  function timezoneEstimate() {
+    let tz = "";
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { /* ignore */ }
+    const c = typeof TZ_COORDS !== "undefined" && TZ_COORDS[tz];
+    if (c) return { lat: c[0], lon: c[1], place: "Near " + tz.split("/").pop().replace(/_/g, " ") };
+    const lon = Math.max(-180, Math.min(180, -new Date().getTimezoneOffset() / 4)); // 15° per hour of UTC offset
+    return { lat: 35, lon, place: "Rough estimate (" + (tz || "time zone") + ")" };
+  }
+  function gpsBlockedHere() {
+    try {
+      const pol = document.permissionsPolicy || document.featurePolicy;
+      if (pol && typeof pol.allowsFeature === "function" && !pol.allowsFeature("geolocation")) return true;
+    } catch (e) { /* ignore */ }
+    return !navigator.geolocation || !window.isSecureContext;
+  }
+  let gpsBusy = false;
   function useGps(silent) {
-    if (!navigator.geolocation) { $("gpsStatus").textContent = "GPS isn't available in this browser."; return; }
-    $("gpsStatus").textContent = "Finding your location…";
-    navigator.geolocation.getCurrentPosition(
-      (pos) => { setLocation(pos.coords.latitude, pos.coords.longitude, "My location"); $("gpsStatus").textContent = `Located to within ~${Math.round(pos.coords.accuracy)} m.`; if (!silent) showPanel(null); },
-      (err) => { $("gpsStatus").textContent = "Couldn't get GPS location: " + err.message + ". Enter it manually below."; },
-      { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 });
+    const status = $("gpsStatus");
+    const fallback = (why) => {
+      const est = timezoneEstimate();
+      if (!silent || !store.get("loc", null)) setLocation(est.lat, est.lon, est.place);
+      status.innerHTML = `${why} Using your time zone instead: <b>${est.place}</b> (${fmtLatLon(est.lat, est.lon)}), ` +
+        "which is close enough for most of the sky. For an exact spot, search your town below.";
+      gpsBusy = false;
+    };
+    if (gpsBlockedHere()) {
+      fallback(window.isSecureContext === false ? "GPS needs a secure (https) page." : "This page isn't allowed to use GPS here (the embedded preview blocks it).");
+      return;
+    }
+    if (gpsBusy) return;
+    gpsBusy = true;
+    status.textContent = "Finding your location… (allow location access if your browser asks)";
+    let done = false;
+    const timer = setTimeout(() => { if (!done) { done = true; fallback("GPS didn't respond."); } }, 20000);
+    const ok = (pos) => {
+      if (done) return; done = true; clearTimeout(timer); gpsBusy = false;
+      setLocation(pos.coords.latitude, pos.coords.longitude, "My location (GPS)");
+      status.textContent = `Located to within ~${Math.round(pos.coords.accuracy).toLocaleString()} m.`;
+      if (!silent) showPanel(null);
+    };
+    const fail = (err, triedHigh) => {
+      if (done) return;
+      if (err.code === 3 && triedHigh) { // timed out: retry with a cached/coarse fix
+        navigator.geolocation.getCurrentPosition(ok, (e2) => fail(e2, false), { enableHighAccuracy: false, timeout: 10000, maximumAge: 3600000 });
+        return;
+      }
+      done = true; clearTimeout(timer);
+      const why = err.code === 1
+        ? "Location permission is off for this page. Allow it in your browser or phone settings (Location → this site/browser) and tap the button again."
+        : err.code === 2 ? "Your device couldn't determine its position." : "Getting a GPS fix took too long.";
+      fallback(why);
+    };
+    try {
+      navigator.geolocation.getCurrentPosition(ok, (e) => fail(e, true), { enableHighAccuracy: true, timeout: 12000, maximumAge: 300000 });
+    } catch (e) { done = true; clearTimeout(timer); fallback("GPS isn't available here."); }
   }
   $("btnGps").onclick = () => useGps(false);
   $("btnSetLoc").onclick = () => setLocation(parseFloat($("latInput").value), parseFloat($("lonInput").value));
@@ -869,22 +918,92 @@
     ["North Pole", 90, 0], ["South Pole", -90, 0]];
   $("cityChips").innerHTML = CITIES.map((c, i) => `<button data-city="${i}">${c[0]}</button>`).join("");
   $("cityChips").onclick = (e) => { const i = e.target.dataset.city; if (i != null) { const c = CITIES[i]; setLocation(c[1], c[2], c[0]); } };
-  $("searchForm").onsubmit = async (e) => {
-    e.preventDefault();
+  // ---------- place search: offline city list, coordinates, then online lookup ----------
+  let cityRows = null, cityLoading = null;
+  const fold = (t) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  let regionNames = null;
+  try { regionNames = new Intl.DisplayNames(["en"], { type: "region" }); } catch (e) { /* ignore */ }
+  const countryName = (cc) => { try { return (regionNames && regionNames.of(cc)) || cc; } catch (e) { return cc; } };
+  function loadCities() {
+    if (cityRows) return Promise.resolve(cityRows);
+    if (typeof CITIES_DB !== "undefined") return Promise.resolve(parseCities());
+    if (!cityLoading) cityLoading = new Promise((res) => {
+      const sc = document.createElement("script"); sc.src = "cities.js";
+      sc.onload = () => res(parseCities()); sc.onerror = () => res(null);
+      document.head.appendChild(sc);
+    });
+    return cityLoading;
+  }
+  function parseCities() {
+    cityRows = CITIES_DB.split("\n").map((l) => { const f = l.split("|"); return { name: f[0], region: f[1], cc: f[2], lat: +f[3], lon: +f[4], pop: +f[5], key: fold(f[0]) }; });
+    return cityRows;
+  }
+  $("placeInput").addEventListener("focus", () => loadCities(), { once: true });
+  function parseCoords(q) {
+    const m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*°?\s*([NS])?[\s,;]+(-?\d+(?:\.\d+)?)\s*°?\s*([EW])?\s*$/i);
+    if (!m) return null;
+    let lat = +m[1], lon = +m[3];
+    if (m[2] && /s/i.test(m[2])) lat = -Math.abs(lat);
+    if (m[4] && /w/i.test(m[4])) lon = -Math.abs(lon);
+    return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat, lon } : null;
+  }
+  function searchCities(q) {
+    const parts = fold(q).split(",").map((t) => t.trim()).filter(Boolean);
+    const name = parts[0], ctx2 = parts.slice(1).join(" ");
+    const out = [];
+    for (const c of cityRows) { // already sorted by population
+      if (!c.key.startsWith(name)) continue;
+      if (ctx2) {
+        const where = fold(c.region + " " + countryName(c.cc) + " " + c.cc);
+        if (!ctx2.split(/\s+/).every((w) => where.includes(w))) continue;
+      }
+      out.push(c);
+      if (out.length >= 8) break;
+    }
+    out.sort((a, b) => (b.key === name) - (a.key === name) || b.pop - a.pop);
+    return out;
+  }
+  function showResults(list) {
+    const box = $("placeResults"); box.innerHTML = "";
+    list.forEach((r) => {
+      const b = document.createElement("button");
+      b.textContent = r.label;
+      b.onclick = () => { setLocation(r.lat, r.lon, r.short); box.innerHTML = ""; $("placeInput").value = ""; $("gpsStatus").textContent = ""; };
+      box.appendChild(b);
+    });
+  }
+  // forms can't submit inside sandboxed previews, so run search from the button and the Enter key directly
+  function bindSearch(formId, inputId, fn) {
+    const form = $(formId), input = $(inputId);
+    form.addEventListener("submit", (e) => e.preventDefault());
+    form.querySelector("button").addEventListener("click", (e) => { e.preventDefault(); fn(); });
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); fn(); } });
+  }
+  bindSearch("searchForm", "placeInput", placeSearch);
+  async function placeSearch() {
     const q = $("placeInput").value.trim(); if (!q) return;
+    const co = parseCoords(q);
+    if (co) { setLocation(co.lat, co.lon); $("placeResults").textContent = "Location set to " + fmtLatLon(co.lat, co.lon) + "."; return; }
     $("placeResults").textContent = "Searching…";
-    try {
+    const rows = await loadCities();
+    if (rows) {
+      const hits = searchCities(q);
+      if (hits.length) {
+        showResults(hits.map((c) => {
+          const where = [c.region, countryName(c.cc)].filter(Boolean).join(", ");
+          return { lat: c.lat, lon: c.lon, short: `${c.name}, ${c.cc === "US" && c.region ? c.region : countryName(c.cc)}`, label: `${c.name} — ${where}` };
+        }));
+        return;
+      }
+    }
+    try { // smaller places: try the online geocoder (blocked inside the preview, fine elsewhere)
       const r = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=5&q=" + encodeURIComponent(q), { headers: { Accept: "application/json" } });
       const js = await r.json();
-      if (!js.length) { $("placeResults").textContent = "No places found."; return; }
-      $("placeResults").innerHTML = "";
-      js.forEach((p) => {
-        const b = document.createElement("button");
-        b.textContent = p.display_name;
-        b.onclick = () => { setLocation(parseFloat(p.lat), parseFloat(p.lon), p.display_name.split(",").slice(0, 2).join(",")); $("placeResults").innerHTML = ""; };
-        $("placeResults").appendChild(b);
-      });
-    } catch (err) { $("placeResults").textContent = "Search unavailable — enter coordinates instead."; }
+      if (!js.length) throw new Error("none");
+      showResults(js.map((p) => ({ lat: parseFloat(p.lat), lon: parseFloat(p.lon), short: p.display_name.split(",").slice(0, 2).join(","), label: p.display_name })));
+    } catch (err) {
+      $("placeResults").textContent = "No match. Try a nearby larger town (e.g. \"Springfield, Illinois\") or type coordinates like 40.71, -74.01.";
+    }
   };
 
   // ---------- what's up ----------
@@ -922,8 +1041,8 @@
   STARS.forEach((s, i) => { if (s[4] && !findIndex.has(s[4].toLowerCase())) findIndex.set(s[4].toLowerCase(), { kind: "star", i }); });
   $("findList").innerHTML = [...BODIES.map((b) => b.name), ...CONSTELLATIONS.map((c) => c.name), ...STARS.filter((s) => s[4] && s[2] < 3.5).map((s) => s[4])]
     .map((n) => `<option value="${n}">`).join("");
-  $("findForm").onsubmit = (e) => {
-    e.preventDefault();
+  bindSearch("findForm", "findInput", findObject);
+  function findObject() {
     const q = $("findInput").value.trim().toLowerCase();
     let sel = findIndex.get(q);
     if (!sel) for (const [k, v] of findIndex) if (k.startsWith(q)) { sel = v; break; }
@@ -1014,7 +1133,11 @@
   $("latInput").value = state.lat.toFixed(4); $("lonInput").value = state.lon.toFixed(4);
   recompute();
   requestAnimationFrame(frame);
-  if (!savedLoc) useGps(true);
+  if (!savedLoc) {
+    const est = timezoneEstimate();
+    setLocation(est.lat, est.lon, est.place);
+    if (!gpsBlockedHere()) useGps(true);
+  }
 
   // expose for debugging/tests
   window.StarGazer = { state, recompute, bodyByName, STARS, starHor, hAlt, hAz, setLocation, setTime, select };

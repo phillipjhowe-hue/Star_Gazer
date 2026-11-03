@@ -6,6 +6,8 @@ import re
 root = os.path.join(os.path.dirname(__file__), "..")
 read = lambda p: open(os.path.join(root, p), encoding="utf-8").read()
 html = read("index.html")
+# the city list is lazy-loaded on the website; inline it in the single-file build
+html = html.replace('<script src="app.js">', '<script src="cities.js"></script>\n<script src="app.js">')
 html = html.replace('<link rel="stylesheet" href="style.css">', "<style>\n" + read("style.css") + "\n</style>")
 for src in re.findall(r'<script src="([^"]+)"></script>', html):
     js = read(src).replace("</script", "<\\/script")

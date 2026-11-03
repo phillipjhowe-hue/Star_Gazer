@@ -46,8 +46,8 @@
   <button class="primary wide" id="btnGps">Use my GPS location</button>
   <p class="muted small" id="gpsStatus"></p>
   <form id="searchForm" class="row">
-    <input id="placeInput" type="search" placeholder="Search a city or place…" autocomplete="off">
-    <button type="submit">Search</button>
+    <input id="placeInput" type="search" placeholder="City (e.g. Denver or Paris, France) or 40.7, -74.0" autocomplete="off">
+    <button type="button">Search</button>
   </form>
   <div id="placeResults"></div>
   <div class="row two">
@@ -90,7 +90,7 @@
   <form id="findForm" class="row">
     <input id="findInput" list="findList" placeholder="Find a star, planet or constellation…" autocomplete="off">
     <datalist id="findList"></datalist>
-    <button type="submit">Go</button>
+    <button type="button">Go</button>
   </form>
   <p class="muted small" id="skyCond"></p>
   <h3>Planets, Sun &amp; Moon</h3>
@@ -125,6 +125,7 @@
 <script src="lib/astronomy.browser.min.js"></script>
 <script src="data.js"></script>
 <script src="constellations_info.js"></script>
+<script src="timezones.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
